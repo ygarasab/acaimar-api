@@ -1,0 +1,11 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "MONGODB_CONNECTION_STRING": "mongodb://localhost:27017/",
+    "MONGODB_DATABASE": "acaimar",
+    "JWT_SECRET": "change-this-to-a-random-secret-key-in-production",
+    "AZURE_FUNCTIONS_ENVIRONMENT": "Development"
+  }
+}
