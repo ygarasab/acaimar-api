@@ -20,7 +20,8 @@ def json_response(data: Any, status_code: int = 200) -> func.HttpResponse:
     return func.HttpResponse(
         json.dumps(data, ensure_ascii=False),
         status_code=status_code,
-        mimetype="application/json"
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
     )
 
 
@@ -43,7 +44,8 @@ def error_response(error: str, status_code: int = 400, details: Optional[str] = 
     return func.HttpResponse(
         json.dumps(response_data, ensure_ascii=False),
         status_code=status_code,
-        mimetype="application/json"
+        mimetype="application/json",
+        headers={"Access-Control-Allow-Origin": "*"}
     )
 
 
@@ -58,7 +60,10 @@ def success_response(data: Dict[str, Any], status_code: int = 200) -> func.HttpR
     Returns:
         HTTP success response
     """
-    return json_response(data, status_code)
+    response = json_response(data, status_code)
+    # Add CORS headers
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    return response
 
 
 def method_not_allowed_response() -> func.HttpResponse:

@@ -3,6 +3,10 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
+    "DB_PROVIDER": "cosmosdb",
+    "COSMOSDB_ENDPOINT": "https://acaimar.documents.azure.com:443/",
+    "COSMOSDB_KEY": "your-cosmosdb-primary-key",
+    "COSMOSDB_DATABASE": "acaimar",
     "MONGODB_CONNECTION_STRING": "mongodb://localhost:27017/",
     "MONGODB_DATABASE": "acaimar",
     "JWT_SECRET": "change-this-to-a-random-secret-key-in-production",

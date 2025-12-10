@@ -1,12 +1,12 @@
 # AÇAIMAR API - Azure Functions
 
-API layer for the AÇAIMAR project built with Azure Functions (Python) and MongoDB.
+API layer for the AÇAIMAR project built with Azure Functions (Python). Supports both MongoDB and CosmosDB (MongoDB API).
 
 ## 🏗️ Architecture
 
 - **Runtime**: Python 3.9+
 - **Framework**: Azure Functions v2
-- **Database**: MongoDB
+- **Database**: MongoDB or CosmosDB (MongoDB API) - configurable via `DB_PROVIDER` environment variable
 - **Data Visualization**: Matplotlib, Seaborn, Pandas
 
 ## 📁 Project Structure
@@ -14,7 +14,7 @@ API layer for the AÇAIMAR project built with Azure Functions (Python) and Mongo
 ```
 api/
 ├── shared/
-│   └── db_connection.py      # MongoDB connection utility
+│   └── db_connection.py      # Database connection utility (MongoDB/CosmosDB)
 ├── get_metas/                # GET /api/metas
 ├── get_meta/                 # GET /api/metas/{id}
 ├── create_meta/              # POST /api/metas
@@ -32,7 +32,7 @@ api/
 
 - Python 3.9 or higher
 - Azure Functions Core Tools v4
-- MongoDB instance (local or cloud)
+- MongoDB instance (local or cloud) OR Azure CosmosDB with MongoDB API
 - Azure account (for deployment)
 
 ### Local Development Setup
@@ -64,26 +64,45 @@ api/
 
 4. **Configure environment variables**
 
-   Copy the example settings file and configure your MongoDB connection:
+   Copy the example settings file and configure your database connection:
 
    ```bash
    cp local.settings.json.example local.settings.json
    ```
 
-   Edit `local.settings.json` with your MongoDB connection string:
+   Edit `local.settings.json` with your database connection details:
 
+   **For MongoDB:**
    ```json
    {
      "IsEncrypted": false,
      "Values": {
        "AzureWebJobsStorage": "UseDevelopmentStorage=true",
        "FUNCTIONS_WORKER_RUNTIME": "python",
+       "DB_PROVIDER": "mongodb",
        "MONGODB_CONNECTION_STRING": "mongodb://your-connection-string",
        "MONGODB_DATABASE": "acaimar",
        "AZURE_FUNCTIONS_ENVIRONMENT": "Development"
      }
    }
    ```
+
+   **For CosmosDB (MongoDB API):**
+   ```json
+   {
+     "IsEncrypted": false,
+     "Values": {
+       "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+       "FUNCTIONS_WORKER_RUNTIME": "python",
+       "DB_PROVIDER": "cosmosdb",
+       "COSMOSDB_CONNECTION_STRING": "mongodb://your-account.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@your-account@",
+       "COSMOSDB_DATABASE": "acaimar",
+       "AZURE_FUNCTIONS_ENVIRONMENT": "Development"
+     }
+   }
+   ```
+
+   **Note:** You can switch between providers by changing the `DB_PROVIDER` environment variable to `"mongodb"` or `"cosmosdb"`. The connection string environment variable names can be used interchangeably (CosmosDB will also accept `MONGODB_CONNECTION_STRING`).
 
 5. **Run locally**
 
@@ -332,13 +351,26 @@ Generate time series charts for sensor data.
 
 2. **Configure Application Settings**
 
+   **For MongoDB:**
    ```bash
    az functionapp config appsettings set \
      --name <function-app-name> \
      --resource-group <resource-group> \
      --settings \
+       DB_PROVIDER="mongodb" \
        MONGODB_CONNECTION_STRING="<your-connection-string>" \
        MONGODB_DATABASE="acaimar"
+   ```
+
+   **For CosmosDB:**
+   ```bash
+   az functionapp config appsettings set \
+     --name <function-app-name> \
+     --resource-group <resource-group> \
+     --settings \
+       DB_PROVIDER="cosmosdb" \
+       COSMOSDB_CONNECTION_STRING="<your-cosmosdb-connection-string>" \
+       COSMOSDB_DATABASE="acaimar"
    ```
 
 3. **Deploy**
@@ -372,7 +404,7 @@ curl http://localhost:7071/api/visualization/metas-status
 ## 📦 Dependencies
 
 - `azure-functions` - Azure Functions runtime
-- `pymongo` - MongoDB driver
+- `pymongo` - MongoDB/CosmosDB driver (works with both MongoDB and CosmosDB MongoDB API)
 - `pandas` - Data manipulation
 - `matplotlib` - Chart generation
 - `seaborn` - Enhanced visualizations
@@ -381,7 +413,8 @@ curl http://localhost:7071/api/visualization/metas-status
 ## 🔒 Security Notes
 
 - In production, set `authLevel` to `function` or `admin` in `function.json`
-- Store MongoDB connection strings in Azure Key Vault or App Settings
+- Store database connection strings in Azure Key Vault or App Settings
+- Use `DB_PROVIDER` environment variable to switch between MongoDB and CosmosDB
 - Enable CORS properly for your frontend domain
 - Use environment-specific connection strings
 
