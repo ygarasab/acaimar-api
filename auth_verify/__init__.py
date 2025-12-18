@@ -3,12 +3,33 @@ import logging
 import json
 import sys
 import os
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.auth import get_token_from_request, verify_token
-from shared.utils.responses import error_response, success_response, unauthorized_response
+import traceback
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Add parent directory to path
+try:
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    logger.info(f"Added to sys.path: {parent_dir}")
+except Exception as path_error:
+    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+
+# Import shared modules with error handling
+try:
+    from shared.auth import get_token_from_request, verify_token
+    logger.info("Successfully imported auth functions")
+except ImportError as e:
+    logger.error(f"Failed to import auth functions: {str(e)}", exc_info=True)
+    raise
+
+try:
+    from shared.utils.responses import error_response, success_response, unauthorized_response
+    logger.info("Successfully imported response utilities")
+except ImportError as e:
+    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
+    raise
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -48,5 +69,9 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         return success_response(user_info, 200)
     except Exception as e:
-        logger.error(f"Error verifying token: {str(e)}", exc_info=True)
-        return error_response("Failed to verify token", 500, str(e))
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"Error verifying token: {error_msg}")
+        logger.error(f"Traceback: {error_trace}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        return error_response("Failed to verify token", 500, error_msg)

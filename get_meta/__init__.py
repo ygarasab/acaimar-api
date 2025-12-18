@@ -4,12 +4,33 @@ import json
 from bson import ObjectId
 import sys
 import os
-
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.db_connection import get_collection
-from shared.utils.responses import error_response, success_response, not_found_response
+import traceback
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Add parent directory to path
+try:
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    logger.info(f"Added to sys.path: {parent_dir}")
+except Exception as path_error:
+    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+
+# Import shared modules with error handling
+try:
+    from shared.db_connection import get_collection
+    logger.info("Successfully imported get_collection")
+except ImportError as e:
+    logger.error(f"Failed to import get_collection: {str(e)}", exc_info=True)
+    raise
+
+try:
+    from shared.utils.responses import error_response, success_response, not_found_response
+    logger.info("Successfully imported response utilities")
+except ImportError as e:
+    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
+    raise
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -27,8 +48,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             collection = get_collection('metas')
             meta = collection.find_one({"_id": ObjectId(meta_id)})
         except Exception as db_error:
-            logger.error(f"Database error retrieving meta: {str(db_error)}")
-            return error_response("Failed to retrieve meta from database", 500, str(db_error))
+            error_msg = str(db_error)
+            error_trace = traceback.format_exc()
+            logger.error(f"Database error retrieving meta: {error_msg}")
+            logger.error(f"Traceback: {error_trace}")
+            logger.error(f"Exception type: {type(db_error).__name__}")
+            return error_response("Failed to retrieve meta from database", 500, error_msg)
         
         if not meta:
             return not_found_response("Meta")
@@ -37,8 +62,15 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         
         return success_response(meta, 200)
     except ValueError as e:
-        logger.error(f"Invalid meta ID format: {str(e)}")
-        return error_response("Invalid meta ID format", 400, str(e))
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"Invalid meta ID format: {error_msg}")
+        logger.error(f"Traceback: {error_trace}")
+        return error_response("Invalid meta ID format", 400, error_msg)
     except Exception as e:
-        logger.error(f"Error retrieving meta: {str(e)}", exc_info=True)
-        return error_response("Failed to retrieve meta", 500, str(e))
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"Error retrieving meta: {error_msg}")
+        logger.error(f"Traceback: {error_trace}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        return error_response("Failed to retrieve meta", 500, error_msg)

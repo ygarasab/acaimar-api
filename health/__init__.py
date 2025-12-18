@@ -3,13 +3,34 @@ import logging
 import json
 import sys
 import os
+import traceback
 from datetime import datetime
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.db_connection import get_database, get_db_provider, get_collection
-from shared.utils.responses import json_response, error_response
-
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
+# Add parent directory to path
+try:
+    parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, parent_dir)
+    logger.info(f"Added to sys.path: {parent_dir}")
+except Exception as path_error:
+    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+
+# Import shared modules with error handling
+try:
+    from shared.db_connection import get_database, get_db_provider, get_collection
+    logger.info("Successfully imported database functions")
+except ImportError as e:
+    logger.error(f"Failed to import database functions: {str(e)}", exc_info=True)
+    raise
+
+try:
+    from shared.utils.responses import json_response, error_response
+    logger.info("Successfully imported response utilities")
+except ImportError as e:
+    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
+    raise
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -115,9 +136,13 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return response
         
     except Exception as e:
-        logger.error(f"Critical error in health check endpoint: {str(e)}", exc_info=True)
+        error_msg = str(e)
+        error_trace = traceback.format_exc()
+        logger.error(f"Critical error in health check endpoint: {error_msg}")
+        logger.error(f"Traceback: {error_trace}")
+        logger.error(f"Exception type: {type(e).__name__}")
         return error_response(
             "Health check endpoint encountered an unexpected error",
             500,
-            str(e)
+            error_msg
         )
