@@ -46,7 +46,13 @@ def _debug_import_errors_enabled() -> bool:
         or os.environ.get("FUNC_DEBUG_IMPORT_ERRORS", "")
         or os.environ.get("HEALTH_DEBUG", "")
     ).lower()
-    return v in ("1", "true", "yes", "on")
+    if v in ("1", "true", "yes", "on"):
+        return True
+
+    # Developer ergonomics: when running locally, include import errors by default.
+    # This avoids "service unavailable (import errors)" without any visibility into why.
+    env = (os.environ.get("AZURE_FUNCTIONS_ENVIRONMENT", "") or "").lower()
+    return env in ("development", "dev", "local")
 
 
 def fallback_json_response(data: Any, status_code: int = 200, headers: Optional[Dict[str, str]] = None) -> func.HttpResponse:
