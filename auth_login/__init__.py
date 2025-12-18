@@ -3,25 +3,46 @@ import logging
 import sys
 import os
 import traceback
+import json
 
+# Configure logging - Azure Functions uses root logger
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
+# Also use print - Azure Functions always logs print statements
+print("=" * 50)
+print("MODULE LOAD: auth_login/__init__.py")
+print(f"Python version: {sys.version}")
+print(f"Current directory: {os.getcwd()}")
+print(f"__file__: {__file__}")
+print("=" * 50)
 
 # Add parent directory to path
 try:
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, parent_dir)
     logger.info(f"Added to sys.path: {parent_dir}")
+    print(f"INFO: Added to sys.path: {parent_dir}")
+    print(f"INFO: sys.path contents: {sys.path[:3]}")  # Print first 3 entries
 except Exception as path_error:
-    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+    error_msg = f"Error setting up sys.path: {str(path_error)}"
+    logger.error(error_msg, exc_info=True)
+    print(f"ERROR: {error_msg}")
+    print(f"ERROR: {traceback.format_exc()}")
 
 # Import shared modules with error handling
+import_errors = []
 try:
     from shared.auth import generate_token
     logger.info("Successfully imported generate_token")
+    print("INFO: Successfully imported generate_token")
 except ImportError as e:
-    logger.error(f"Failed to import generate_token: {str(e)}", exc_info=True)
-    logger.error(f"sys.path: {sys.path}")
+    error_msg = f"Failed to import generate_token: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    print(f"ERROR: {error_msg}")
+    print(f"ERROR: sys.path: {sys.path}")
+    import_errors.append(error_msg)
     raise
 
 try:
@@ -32,9 +53,13 @@ try:
         unauthorized_response
     )
     logger.info("Successfully imported response utilities")
+    print("INFO: Successfully imported response utilities")
 except ImportError as e:
-    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
-    logger.error(f"sys.path: {sys.path}")
+    error_msg = f"Failed to import response utilities: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    print(f"ERROR: {error_msg}")
+    print(f"ERROR: sys.path: {sys.path}")
+    import_errors.append(error_msg)
     raise
 
 try:
@@ -43,15 +68,23 @@ try:
         sanitize_email
     )
     logger.info("Successfully imported validators")
+    print("INFO: Successfully imported validators")
 except ImportError as e:
-    logger.error(f"Failed to import validators: {str(e)}", exc_info=True)
+    error_msg = f"Failed to import validators: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    print(f"ERROR: {error_msg}")
+    import_errors.append(error_msg)
     raise
 
 try:
     from shared.services import authenticate_user
     logger.info("Successfully imported authenticate_user")
+    print("INFO: Successfully imported authenticate_user")
 except ImportError as e:
-    logger.error(f"Failed to import authenticate_user: {str(e)}", exc_info=True)
+    error_msg = f"Failed to import authenticate_user: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    print(f"ERROR: {error_msg}")
+    import_errors.append(error_msg)
     raise
 
 
@@ -60,6 +93,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     POST /api/auth/login
     Authenticate user and return JWT token
     """
+    print(f"INFO: auth_login function called, method: {req.method}")
+    logger.info(f"auth_login function called, method: {req.method}")
     try:
         if req.method == 'OPTIONS':
             # Handle CORS preflight
@@ -114,7 +149,23 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     except Exception as e:
         error_msg = str(e)
         error_trace = traceback.format_exc()
+        print(f"ERROR: Error logging in user: {error_msg}")
+        print(f"ERROR: Traceback: {error_trace}")
+        print(f"ERROR: Exception type: {type(e).__name__}")
         logger.error(f"Error logging in user: {error_msg}")
         logger.error(f"Traceback: {error_trace}")
         logger.error(f"Exception type: {type(e).__name__}")
-        return error_response("Failed to authenticate", 500, error_msg)
+        try:
+            return error_response("Failed to authenticate", 500, error_msg)
+        except:
+            # Fallback if error_response also fails
+            import json
+            return func.HttpResponse(
+                json.dumps({
+                    "error": "Failed to authenticate",
+                    "details": error_msg,
+                    "traceback": error_trace
+                }),
+                status_code=500,
+                mimetype="application/json"
+            )
