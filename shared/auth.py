@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict
 from functools import wraps
 import azure.functions as func
+from shared.utils.responses import unauthorized_response, forbidden_response
 
 logger = logging.getLogger(__name__)
 
@@ -98,36 +99,28 @@ def require_auth(require_role: Optional[str] = None):
     def decorator(func_handler):
         @wraps(func_handler)
         def wrapper(req: func.HttpRequest) -> func.HttpResponse:
-            token = get_token_from_request(req)
-            
-            if not token:
-                return func.HttpResponse(
-                    '{"error": "Authentication required"}',
-                    status_code=401,
-                    mimetype="application/json"
-                )
-            
-            payload = verify_token(token)
-            
-            if not payload:
-                return func.HttpResponse(
-                    '{"error": "Invalid or expired token"}',
-                    status_code=401,
-                    mimetype="application/json"
-                )
-            
-            # Check role if required
-            if require_role and payload.get('role') != require_role:
-                return func.HttpResponse(
-                    '{"error": "Insufficient permissions"}',
-                    status_code=403,
-                    mimetype="application/json"
-                )
-            
-            # Attach user info to request for use in handler
-            req.user = payload
-            
-            return func_handler(req)
+            try:
+                token = get_token_from_request(req)
+                
+                if not token:
+                    return unauthorized_response("Authentication required. Please provide a valid token.")
+                
+                payload = verify_token(token)
+                
+                if not payload:
+                    return unauthorized_response("Invalid or expired token. Please login again.")
+                
+                # Check role if required
+                if require_role and payload.get('role') != require_role:
+                    return forbidden_response(f"This endpoint requires '{require_role}' role. Your current role is '{payload.get('role', 'user')}'.")
+                
+                # Attach user info to request for use in handler
+                req.user = payload
+                
+                return func_handler(req)
+            except Exception as e:
+                logger.error(f"Error in authentication decorator: {str(e)}")
+                return unauthorized_response(f"Authentication error: {str(e)}")
         
         return wrapper
     return decorator

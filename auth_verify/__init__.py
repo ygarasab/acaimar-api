@@ -6,6 +6,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.auth import get_token_from_request, verify_token
+from shared.utils.responses import error_response, success_response, unauthorized_response
 
 logger = logging.getLogger(__name__)
 
@@ -30,22 +31,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         token = get_token_from_request(req)
         
         if not token:
-            return func.HttpResponse(
-                json.dumps({"error": "Token required"}),
-                status_code=401,
-                mimetype="application/json",
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            return unauthorized_response("Token required. Please provide a valid JWT token in the Authorization header.")
         
         payload = verify_token(token)
         
         if not payload:
-            return func.HttpResponse(
-                json.dumps({"error": "Invalid or expired token"}),
-                status_code=401,
-                mimetype="application/json",
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            return unauthorized_response("Invalid or expired token. Please login again to get a new token.")
         
         # Return user info from token
         user_info = {
@@ -55,16 +46,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             "valid": True
         }
         
-        return func.HttpResponse(
-            json.dumps(user_info, ensure_ascii=False),
-            status_code=200,
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return success_response(user_info, 200)
     except Exception as e:
-        logger.error(f"Error verifying token: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": "Failed to verify token", "details": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+        logger.error(f"Error verifying token: {str(e)}", exc_info=True)
+        return error_response("Failed to verify token", 500, str(e))

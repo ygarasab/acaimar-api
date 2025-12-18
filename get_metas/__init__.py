@@ -9,6 +9,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.db_connection import get_collection
 from shared.auth import require_auth
+from shared.utils.responses import error_response, success_response
 
 logger = logging.getLogger(__name__)
 
@@ -20,23 +21,18 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     Retrieve all metas from the database
     """
     try:
-        collection = get_collection('metas')
-        metas = list(collection.find({}))
-        
-        # Convert ObjectId to string
-        for meta in metas:
-            meta['_id'] = str(meta['_id'])
-        
-        return func.HttpResponse(
-            json.dumps(metas, ensure_ascii=False),
-            status_code=200,
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        try:
+            collection = get_collection('metas')
+            metas = list(collection.find({}))
+            
+            # Convert ObjectId to string
+            for meta in metas:
+                meta['_id'] = str(meta['_id'])
+            
+            return success_response(metas, 200)
+        except Exception as db_error:
+            logger.error(f"Database error retrieving metas: {str(db_error)}")
+            return error_response("Failed to retrieve metas from database", 500, str(db_error))
     except Exception as e:
-        logger.error(f"Error retrieving metas: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": "Failed to retrieve metas", "details": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+        logger.error(f"Error retrieving metas: {str(e)}", exc_info=True)
+        return error_response("Failed to retrieve metas", 500, str(e))

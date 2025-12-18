@@ -7,6 +7,7 @@ import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.db_connection import get_collection
+from shared.utils.responses import error_response, success_response, not_found_response
 
 logger = logging.getLogger(__name__)
 
@@ -20,34 +21,24 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         meta_id = req.route_params.get('id')
         
         if not meta_id:
-            return func.HttpResponse(
-                json.dumps({"error": "Meta ID is required"}),
-                status_code=400,
-                mimetype="application/json"
-            )
+            return error_response("Meta ID is required in the route path", 400)
         
-        collection = get_collection('metas')
-        meta = collection.find_one({"_id": ObjectId(meta_id)})
+        try:
+            collection = get_collection('metas')
+            meta = collection.find_one({"_id": ObjectId(meta_id)})
+        except Exception as db_error:
+            logger.error(f"Database error retrieving meta: {str(db_error)}")
+            return error_response("Failed to retrieve meta from database", 500, str(db_error))
         
         if not meta:
-            return func.HttpResponse(
-                json.dumps({"error": "Meta not found"}),
-                status_code=404,
-                mimetype="application/json"
-            )
+            return not_found_response("Meta")
         
         meta['_id'] = str(meta['_id'])
         
-        return func.HttpResponse(
-            json.dumps(meta, ensure_ascii=False),
-            status_code=200,
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return success_response(meta, 200)
+    except ValueError as e:
+        logger.error(f"Invalid meta ID format: {str(e)}")
+        return error_response("Invalid meta ID format", 400, str(e))
     except Exception as e:
-        logger.error(f"Error retrieving meta: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": "Failed to retrieve meta", "details": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+        logger.error(f"Error retrieving meta: {str(e)}", exc_info=True)
+        return error_response("Failed to retrieve meta", 500, str(e))

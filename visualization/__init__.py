@@ -15,6 +15,7 @@ import seaborn as sns
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from shared.db_connection import get_collection
+from shared.utils.responses import error_response, success_response, not_found_response
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +45,7 @@ def chart_metas_status(req: func.HttpRequest) -> func.HttpResponse:
         metas = list(collection.find({}))
         
         if not metas:
-            return func.HttpResponse(
-                json.dumps({"error": "No data available for visualization"}),
-                status_code=404,
-                mimetype="application/json"
-            )
+            return not_found_response("No metas data available for visualization")
         
         # Count metas by status
         df = pd.DataFrame(metas)
@@ -63,22 +60,13 @@ def chart_metas_status(req: func.HttpRequest) -> func.HttpResponse:
         
         chart_base64 = generate_chart_base64(fig)
         
-        return func.HttpResponse(
-            json.dumps({
-                "chart": f"data:image/png;base64,{chart_base64}",
-                "data": status_counts.to_dict()
-            }, ensure_ascii=False),
-            status_code=200,
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return success_response({
+            "chart": f"data:image/png;base64,{chart_base64}",
+            "data": status_counts.to_dict()
+        }, 200)
     except Exception as e:
-        logger.error(f"Error generating metas status chart: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": "Failed to generate chart", "details": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+        logger.error(f"Error generating metas status chart: {str(e)}", exc_info=True)
+        return error_response("Failed to generate metas status chart", 500, str(e))
 
 
 def chart_sensor_data(req: func.HttpRequest) -> func.HttpResponse:
@@ -109,21 +97,16 @@ def chart_sensor_data(req: func.HttpRequest) -> func.HttpResponse:
         
         if not sensor_data:
             # Return sample data structure if no data exists
-            return func.HttpResponse(
-                json.dumps({
-                    "message": "No sensor data available",
-                    "sample_structure": {
-                        "timestamp": "ISO format datetime",
-                        "temperature": "float",
-                        "humidity": "float",
-                        "soil_moisture": "float",
-                        "light_intensity": "float"
-                    }
-                }),
-                status_code=200,
-                mimetype="application/json",
-                headers={"Access-Control-Allow-Origin": "*"}
-            )
+            return success_response({
+                "message": "No sensor data available",
+                "sample_structure": {
+                    "timestamp": "ISO format datetime",
+                    "temperature": "float",
+                    "humidity": "float",
+                    "soil_moisture": "float",
+                    "light_intensity": "float"
+                }
+            }, 200)
         
         # Convert to DataFrame
         df = pd.DataFrame(sensor_data)
@@ -162,23 +145,17 @@ def chart_sensor_data(req: func.HttpRequest) -> func.HttpResponse:
         plt.tight_layout()
         chart_base64 = generate_chart_base64(fig)
         
-        return func.HttpResponse(
-            json.dumps({
-                "chart": f"data:image/png;base64,{chart_base64}",
-                "statistics": charts_data,
-                "data_points": len(df)
-            }, ensure_ascii=False),
-            status_code=200,
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+        return success_response({
+            "chart": f"data:image/png;base64,{chart_base64}",
+            "statistics": charts_data,
+            "data_points": len(df)
+        }, 200)
+    except ValueError as ve:
+        logger.error(f"Invalid query parameter: {str(ve)}")
+        return error_response("Invalid query parameter. 'days' must be a positive integer", 400, str(ve))
     except Exception as e:
-        logger.error(f"Error generating sensor data chart: {str(e)}")
-        return func.HttpResponse(
-            json.dumps({"error": "Failed to generate chart", "details": str(e)}),
-            status_code=500,
-            mimetype="application/json"
-        )
+        logger.error(f"Error generating sensor data chart: {str(e)}", exc_info=True)
+        return error_response("Failed to generate sensor data chart", 500, str(e))
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -187,16 +164,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     """
     route = req.route_params.get('chart_type', '')
     
-    if route == 'metas-status':
-        return chart_metas_status(req)
-    elif route == 'sensor-data':
-        return chart_sensor_data(req)
-    else:
-        return func.HttpResponse(
-            json.dumps({
-                "error": "Invalid chart type",
-                "available_charts": ["metas-status", "sensor-data"]
-            }),
-            status_code=400,
-            mimetype="application/json"
-        )
+    try:
+        if route == 'metas-status':
+            return chart_metas_status(req)
+        elif route == 'sensor-data':
+            return chart_sensor_data(req)
+        else:
+            return error_response(
+                f"Invalid chart type '{route}'",
+                400,
+                f"Available chart types: metas-status, sensor-data"
+            )
+    except Exception as e:
+        logger.error(f"Error in visualization router: {str(e)}", exc_info=True)
+        return error_response("Failed to process visualization request", 500, str(e))
