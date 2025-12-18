@@ -8,4 +8,6 @@ seaborn>=0.13.0
 Pillow>=10.1.0
 PyJWT>=2.8.0
 cryptography>=41.0.0,<44.0.0
-bcrypt>=4.1.0
+# Azure Functions Linux currently runs on an older glibc; bcrypt 4.3+/5.x wheels
+# are manylinux_2_34 and will fail to import with errors like GLIBC_2.33 not found.
+bcrypt==4.2.1
