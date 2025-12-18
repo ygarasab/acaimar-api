@@ -29,6 +29,8 @@ print("=" * 50)
 _import_errors = []
 _db_functions_available = False
 _response_functions_available = False
+_auth_deps_available = False
+_auth_deps_error: str | None = None
 
 # Add parent directory to path
 try:
@@ -75,6 +77,25 @@ except ImportError as e:
     _import_errors.append(error_msg)
 except Exception as e:
     error_msg = f"Unexpected error importing response utilities: {str(e)}"
+    logger.error(error_msg, exc_info=True)
+    print(f"ERROR: {error_msg}")
+    print(f"ERROR: {traceback.format_exc()}")
+    _import_errors.append(error_msg)
+
+# Import login/auth dependencies (bcrypt/jwt + shared.auth/services).
+# Health may still work without these, but auth endpoints will be unavailable.
+try:
+    import jwt  # noqa: F401
+    import bcrypt  # noqa: F401
+    from shared.auth import generate_token  # noqa: F401
+    from shared.services import authenticate_user  # noqa: F401
+    _auth_deps_available = True
+    logger.info("Successfully imported auth/login dependencies (jwt, bcrypt, shared.auth, shared.services)")
+    print("INFO: Successfully imported auth/login dependencies (jwt, bcrypt, shared.auth, shared.services)")
+except Exception as e:
+    _auth_deps_available = False
+    _auth_deps_error = str(e)
+    error_msg = f"Failed to import auth/login dependencies: {str(e)}"
     logger.error(error_msg, exc_info=True)
     print(f"ERROR: {error_msg}")
     print(f"ERROR: {traceback.format_exc()}")
@@ -131,10 +152,18 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             "timestamp": datetime.utcnow().isoformat(),
             "service": "AÇAIMAR API",
             "version": "1.0.0",
+            "runtime": {
+                "python": sys.version,
+                "platform": sys.platform,
+            },
             "checks": {
                 "api": {
                     "status": "ok",
                     "message": "API is running"
+                },
+                "auth": {
+                    "status": "ok" if _auth_deps_available else "error",
+                    "message": "Auth dependencies available" if _auth_deps_available else "Auth endpoints unavailable - import failed",
                 },
                 "database": {
                     "status": "unknown",
@@ -217,6 +246,19 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             }
             http_status = 503  # Service Unavailable
             logger.error(f"Health check: Database connection failed ({provider.upper()}) - {str(db_error)}")
+
+        # Degrade health if auth/login dependencies are missing.
+        if not _auth_deps_available:
+            health_status["status"] = "degraded"
+            # Only include details when import-error debugging is enabled.
+            if maybe_attach_import_errors:
+                # Details will be attached via import_errors list; keep message terse here.
+                pass
+            else:
+                # Legacy fallback if maybe_attach_import_errors isn't available.
+                if os.environ.get("HEALTH_DEBUG", "").lower() in ("1", "true", "yes") and _auth_deps_error:
+                    health_status["checks"]["auth"]["error_details"] = _auth_deps_error
+            http_status = 503
         
         # Use json_response if available, otherwise basic HttpResponse
         if _response_functions_available:

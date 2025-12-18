@@ -113,12 +113,12 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
 
         # Only fail if *critical* imports are missing. Response/validator imports can fall back.
         if not generate_token or not authenticate_user:
-            payload = maybe_attach_import_errors(
-                {
-                    "error": "Login service unavailable (server import errors)",
-                },
-                _import_errors,
-            )
+            # Always surface import errors for this endpoint (even in production),
+            # so clients can see exactly what's missing/broken during deployment.
+            payload = {
+                "error": "Login service unavailable (server import errors)",
+                "import_errors": _import_errors,
+            }
             return func.HttpResponse(
                 json.dumps(payload, ensure_ascii=False),
                 status_code=503,
