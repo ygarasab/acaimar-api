@@ -8,28 +8,41 @@ import traceback
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Add parent directory to path
+# Bootstrap shared robustness helpers (safe imports + fallback responses)
+_import_errors = []
 try:
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+    )
+except Exception:
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.insert(0, parent_dir)
-    logger.info(f"Added to sys.path: {parent_dir}")
-except Exception as path_error:
-    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+    )
 
-# Import shared modules with error handling
-try:
-    from shared.auth import get_token_from_request, verify_token
-    logger.info("Successfully imported auth functions")
-except ImportError as e:
-    logger.error(f"Failed to import auth functions: {str(e)}", exc_info=True)
-    raise
+ensure_app_root_on_syspath(__file__, logger=logger)
+responses = get_response_fns(logger=logger, errors=_import_errors)
+error_response = responses.error_response
+success_response = responses.success_response
+unauthorized_response = responses.unauthorized_response
 
-try:
-    from shared.utils.responses import error_response, success_response, unauthorized_response
-    logger.info("Successfully imported response utilities")
-except ImportError as e:
-    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
-    raise
+_, _auth_attrs = safe_import(
+    "shared.auth",
+    ["get_token_from_request", "verify_token"],
+    logger=logger,
+    errors=_import_errors,
+    label="auth functions",
+)
+get_token_from_request = _auth_attrs.get("get_token_from_request")
+verify_token = _auth_attrs.get("verify_token")
 
 
 def main(req: func.HttpRequest) -> func.HttpResponse:
@@ -47,6 +60,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                     "Access-Control-Allow-Methods": "GET, OPTIONS",
                     "Access-Control-Allow-Headers": "Authorization"
                 }
+            )
+
+        if _import_errors or not get_token_from_request or not verify_token:
+            payload = maybe_attach_import_errors(
+                {"error": "Auth verify service unavailable (import errors)"}, _import_errors
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
             )
         
         token = get_token_from_request(req)

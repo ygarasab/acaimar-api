@@ -5,48 +5,81 @@ import sys
 import os
 import traceback
 from datetime import datetime, timedelta
-import pandas as pd
-import numpy as np
 import base64
 from io import BytesIO
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Add parent directory to path
+# Bootstrap shared robustness helpers (safe imports + fallback responses)
+_import_errors = []
 try:
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+    )
+except Exception:
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.insert(0, parent_dir)
-    logger.info(f"Added to sys.path: {parent_dir}")
-except Exception as path_error:
-    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+    )
 
-# Import shared modules with error handling
-try:
-    from shared.db_connection import get_collection
-    logger.info("Successfully imported get_collection")
-except ImportError as e:
-    logger.error(f"Failed to import get_collection: {str(e)}", exc_info=True)
-    raise
+ensure_app_root_on_syspath(__file__, logger=logger)
+responses = get_response_fns(logger=logger, errors=_import_errors)
+error_response = responses.error_response
+success_response = responses.success_response
+not_found_response = responses.not_found_response
 
-try:
-    from shared.utils.responses import error_response, success_response, not_found_response
-    logger.info("Successfully imported response utilities")
-except ImportError as e:
-    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
-    raise
-
-# Set style for better-looking charts
-sns.set_style("whitegrid")
-plt.rcParams['figure.figsize'] = (10, 6)
-plt.rcParams['font.size'] = 10
+_, _db_attrs = safe_import(
+    "shared.db_connection",
+    ["get_collection"],
+    logger=logger,
+    errors=_import_errors,
+    label="db connection",
+)
+get_collection = _db_attrs.get("get_collection")
 
 
-def generate_chart_base64(fig):
+def _load_plotting_libs():
+    """
+    Lazy-load heavy plotting dependencies. Keeps cold starts lighter for non-visualization endpoints.
+    Returns (pd, plt).
+    Raises ImportError/Exception if libs can't be loaded.
+    """
+    import pandas as pd  # noqa: F401
+
+    import matplotlib
+
+    # Ensure non-interactive backend (safe to ignore if backend already set)
+    try:
+        matplotlib.use("Agg")
+    except Exception:
+        pass
+
+    import matplotlib.pyplot as plt  # noqa: F401
+
+    # Optional styling
+    try:
+        import seaborn as sns
+
+        sns.set_style("whitegrid")
+    except Exception:
+        sns = None  # noqa: F841
+
+    plt.rcParams["figure.figsize"] = (10, 6)
+    plt.rcParams["font.size"] = 10
+
+    return pd, plt
+
+
+def generate_chart_base64(fig, plt):
     """Convert matplotlib figure to base64 string"""
     buffer = BytesIO()
     fig.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
@@ -62,6 +95,31 @@ def chart_metas_status(req: func.HttpRequest) -> func.HttpResponse:
     Generate a chart showing the distribution of metas by status
     """
     try:
+        if _import_errors or not get_collection:
+            payload = maybe_attach_import_errors(
+                {"error": "Visualization service unavailable (import errors)"}, _import_errors
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
+        try:
+            pd, plt = _load_plotting_libs()
+        except Exception as lib_error:
+            payload = maybe_attach_import_errors(
+                {"error": "Visualization dependencies unavailable", "details": str(lib_error)},
+                _import_errors,
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
         collection = get_collection('metas')
         metas = list(collection.find({}))
         
@@ -79,7 +137,7 @@ def chart_metas_status(req: func.HttpRequest) -> func.HttpResponse:
                colors=colors[:len(status_counts)], startangle=90)
         ax.set_title('Distribuição de Metas por Status', fontsize=14, fontweight='bold')
         
-        chart_base64 = generate_chart_base64(fig)
+        chart_base64 = generate_chart_base64(fig, plt)
         
         return success_response({
             "chart": f"data:image/png;base64,{chart_base64}",
@@ -101,6 +159,31 @@ def chart_sensor_data(req: func.HttpRequest) -> func.HttpResponse:
     Supports query parameters: days (number of days to visualize)
     """
     try:
+        if _import_errors or not get_collection:
+            payload = maybe_attach_import_errors(
+                {"error": "Visualization service unavailable (import errors)"}, _import_errors
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
+        try:
+            pd, plt = _load_plotting_libs()
+        except Exception as lib_error:
+            payload = maybe_attach_import_errors(
+                {"error": "Visualization dependencies unavailable", "details": str(lib_error)},
+                _import_errors,
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
         # Get query parameters
         days = int(req.params.get('days', 7))
         
@@ -168,7 +251,7 @@ def chart_sensor_data(req: func.HttpRequest) -> func.HttpResponse:
                 }
         
         plt.tight_layout()
-        chart_base64 = generate_chart_base64(fig)
+        chart_base64 = generate_chart_base64(fig, plt)
         
         return success_response({
             "chart": f"data:image/png;base64,{chart_base64}",

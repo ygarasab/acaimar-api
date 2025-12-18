@@ -1,7 +1,6 @@
 import azure.functions as func
 import logging
 import json
-from bson import ObjectId
 import sys
 import os
 import traceback
@@ -9,35 +8,52 @@ import traceback
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Add parent directory to path
+# Bootstrap shared robustness helpers (safe imports + fallback responses + safe auth decorator)
+_import_errors = []
 try:
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+        safe_require_auth,
+    )
+except Exception:
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.insert(0, parent_dir)
-    logger.info(f"Added to sys.path: {parent_dir}")
-except Exception as path_error:
-    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+        safe_require_auth,
+    )
 
-# Import shared modules with error handling
-try:
-    from shared.db_connection import get_collection
-    logger.info("Successfully imported get_collection")
-except ImportError as e:
-    logger.error(f"Failed to import get_collection: {str(e)}", exc_info=True)
-    raise
+ensure_app_root_on_syspath(__file__, logger=logger)
+responses = get_response_fns(logger=logger, errors=_import_errors)
+error_response = responses.error_response
+success_response = responses.success_response
+not_found_response = responses.not_found_response
+require_auth = safe_require_auth(logger=logger, errors=_import_errors)
 
-try:
-    from shared.auth import require_auth
-    logger.info("Successfully imported require_auth")
-except ImportError as e:
-    logger.error(f"Failed to import require_auth: {str(e)}", exc_info=True)
-    raise
+_, _db_attrs = safe_import(
+    "shared.db_connection",
+    ["get_collection"],
+    logger=logger,
+    errors=_import_errors,
+    label="db connection",
+)
+get_collection = _db_attrs.get("get_collection")
 
-try:
-    from shared.utils.responses import error_response, success_response, not_found_response
-    logger.info("Successfully imported response utilities")
-except ImportError as e:
-    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
-    raise
+_, _bson_attrs = safe_import(
+    "bson",
+    ["ObjectId"],
+    logger=logger,
+    errors=_import_errors,
+    label="bson",
+)
+ObjectId = _bson_attrs.get("ObjectId")
 
 
 @require_auth(require_role='admin')
@@ -47,6 +63,17 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     Delete a meta
     """
     try:
+        if _import_errors or not get_collection or not ObjectId:
+            payload = maybe_attach_import_errors(
+                {"error": "Delete meta service unavailable (import errors)"}, _import_errors
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
         meta_id = req.route_params.get('id')
         
         if not meta_id:

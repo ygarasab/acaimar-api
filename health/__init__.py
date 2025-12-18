@@ -6,6 +6,12 @@ import os
 import traceback
 from datetime import datetime
 
+# Common robustness helpers (optional)
+try:
+    from shared.function_bootstrap import maybe_attach_import_errors
+except Exception:
+    maybe_attach_import_errors = None
+
 # Configure logging - Azure Functions uses root logger
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -82,57 +88,39 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     """
     print(f"INFO: health endpoint called, method: {req.method}")
     logger.info(f"health endpoint called, method: {req.method}")
-    
-    # If imports failed, return error immediately
-    if _import_errors:
-        error_details = "; ".join(_import_errors)
-        print(f"ERROR: Import errors detected: {error_details}")
-        logger.error(f"Import errors: {error_details}")
-        
-        # Try to use error_response if available, otherwise use basic HttpResponse
-        if _response_functions_available:
-            try:
-                return error_response(
-                    "Health check failed due to import errors",
-                    500,
-                    error_details
-                )
-            except:
-                pass
-        
-        # Fallback to basic HttpResponse
-        return func.HttpResponse(
-            json.dumps({
-                "status": "error",
-                "error": "Health check failed due to import errors",
-                "details": error_details,
-                "import_errors": _import_errors
-            }, ensure_ascii=False),
-            status_code=500,
-            mimetype="application/json",
-            headers={"Access-Control-Allow-Origin": "*"}
-        )
+
+    # NOTE: Import errors should not hard-fail the endpoint with 500.
+    # We can still return a useful response (healthy/degraded) using basic HttpResponse fallbacks.
     
     try:
         # Check if database functions are available
         if not _db_functions_available:
-            return func.HttpResponse(
-                json.dumps({
-                    "status": "degraded",
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "service": "AÇAIMAR API",
-                    "version": "1.0.0",
-                    "checks": {
-                        "api": {
-                            "status": "ok",
-                            "message": "API is running"
-                        },
-                        "database": {
-                            "status": "error",
-                            "message": "Database functions not available - import failed"
-                        }
+            payload = {
+                "status": "degraded",
+                "timestamp": datetime.utcnow().isoformat(),
+                "service": "AÇAIMAR API",
+                "version": "1.0.0",
+                "checks": {
+                    "api": {
+                        "status": "ok",
+                        "message": "API is running"
+                    },
+                    "database": {
+                        "status": "error",
+                        "message": "Database functions not available - import failed"
                     }
-                }, ensure_ascii=False),
+                },
+            }
+
+            if maybe_attach_import_errors:
+                payload = maybe_attach_import_errors(payload, _import_errors)
+            else:
+                # Fallback to legacy behavior
+                if os.environ.get("HEALTH_DEBUG", "").lower() in ("1", "true", "yes") and _import_errors:
+                    payload["import_errors"] = _import_errors
+
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
                 status_code=503,
                 mimetype="application/json",
                 headers={"Access-Control-Allow-Origin": "*"}
@@ -165,8 +153,8 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
             # Test connection by querying a collection
             test_collection = get_collection('users')
             
-            # Try to query (this will fail if connection is bad)
-            test_collection.find({})
+            # Try a lightweight query (forces a round-trip for both MongoDB and Cosmos wrapper)
+            test_collection.find_one({})
             
             # Get basic stats
             if provider == 'cosmosdb':
@@ -178,7 +166,7 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
                 for coll_name in collections:
                     try:
                         coll = get_collection(coll_name)
-                        coll.find({})  # Test access
+                        coll.find_one({})  # Test access (lightweight)
                         collection_count += 1
                     except Exception as coll_error:
                         logger.debug(f"Could not access collection {coll_name}: {str(coll_error)}")

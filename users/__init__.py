@@ -3,60 +3,69 @@ import logging
 import sys
 import os
 import traceback
+import json
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-# Add parent directory to path
+# Bootstrap shared robustness helpers (safe imports + fallback responses + safe auth decorator)
+_import_errors = []
 try:
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+        safe_require_auth,
+    )
+except Exception:
     parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    sys.path.insert(0, parent_dir)
-    logger.info(f"Added to sys.path: {parent_dir}")
-except Exception as path_error:
-    logger.error(f"Error setting up sys.path: {str(path_error)}", exc_info=True)
-
-# Import shared modules with error handling
-try:
-    from shared.auth import require_auth
-    logger.info("Successfully imported require_auth")
-except ImportError as e:
-    logger.error(f"Failed to import require_auth: {str(e)}", exc_info=True)
-    raise
-
-try:
-    from shared.utils import (
-        error_response,
-        success_response,
-        method_not_allowed_response
+    if parent_dir not in sys.path:
+        sys.path.insert(0, parent_dir)
+    from shared.function_bootstrap import (
+        ensure_app_root_on_syspath,
+        get_response_fns,
+        maybe_attach_import_errors,
+        safe_import,
+        safe_require_auth,
     )
-    logger.info("Successfully imported response utilities")
-except ImportError as e:
-    logger.error(f"Failed to import response utilities: {str(e)}", exc_info=True)
-    raise
 
-try:
-    from shared.validators import (
-        validate_required_fields,
-        validate_email,
-        validate_password,
-        sanitize_email,
-        sanitize_string
-    )
-    logger.info("Successfully imported validators")
-except ImportError as e:
-    logger.error(f"Failed to import validators: {str(e)}", exc_info=True)
-    raise
+ensure_app_root_on_syspath(__file__, logger=logger)
+responses = get_response_fns(logger=logger, errors=_import_errors)
+error_response = responses.error_response
+success_response = responses.success_response
+method_not_allowed_response = responses.method_not_allowed_response
+require_auth = safe_require_auth(logger=logger, errors=_import_errors)
 
-try:
-    from shared.services import (
-        get_all_users,
-        create_user as create_user_db,
-        user_exists
-    )
-    logger.info("Successfully imported service functions")
-except ImportError as e:
-    logger.error(f"Failed to import service functions: {str(e)}", exc_info=True)
-    raise
+_, _validator_attrs = safe_import(
+    "shared.validators",
+    [
+        "validate_required_fields",
+        "validate_email",
+        "validate_password",
+        "sanitize_email",
+        "sanitize_string",
+    ],
+    logger=logger,
+    errors=_import_errors,
+    label="validators",
+)
+validate_required_fields = _validator_attrs.get("validate_required_fields")
+validate_email = _validator_attrs.get("validate_email")
+validate_password = _validator_attrs.get("validate_password")
+sanitize_email = _validator_attrs.get("sanitize_email")
+sanitize_string = _validator_attrs.get("sanitize_string")
+
+_, _service_attrs = safe_import(
+    "shared.services",
+    ["get_all_users", "create_user", "user_exists"],
+    logger=logger,
+    errors=_import_errors,
+    label="user services",
+)
+get_all_users = _service_attrs.get("get_all_users")
+create_user_db = _service_attrs.get("create_user")
+user_exists = _service_attrs.get("user_exists")
 
 
 @require_auth(require_role='admin')
@@ -66,6 +75,28 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
     POST /api/users - Create a new user
     """
     try:
+        if _import_errors or not all(
+            [
+                validate_required_fields,
+                validate_email,
+                validate_password,
+                sanitize_email,
+                sanitize_string,
+                get_all_users,
+                create_user_db,
+                user_exists,
+            ]
+        ):
+            payload = maybe_attach_import_errors(
+                {"error": "Users service unavailable (import errors)"}, _import_errors
+            )
+            return func.HttpResponse(
+                json.dumps(payload, ensure_ascii=False),
+                status_code=503,
+                mimetype="application/json",
+                headers={"Access-Control-Allow-Origin": "*"},
+            )
+
         if req.method == 'GET':
             return get_users(req)
         elif req.method == 'POST':
