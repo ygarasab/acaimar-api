@@ -4,7 +4,7 @@ import sys
 import os
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from shared.utils.responses import success_response
+from shared.utils import success_response
 
 logger = logging.getLogger(__name__)
 
@@ -18,5 +18,10 @@ def main(req: func.HttpRequest) -> func.HttpResponse:
         return success_response({"status": "ok"}, 200)
     except Exception as e:
         logger.error(f"Error in ok endpoint: {str(e)}", exc_info=True)
-        # Even if there's an error, try to return something
-        return success_response({"status": "ok"}, 200)
+        # Fallback to basic HttpResponse if there's an import error
+        return func.HttpResponse(
+            '{"status": "ok"}',
+            status_code=200,
+            mimetype="application/json",
+            headers={"Access-Control-Allow-Origin": "*"}
+        )
